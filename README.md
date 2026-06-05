@@ -1,12 +1,18 @@
-# Super-linear `rustc -O` compile time for a `?`-chain building a struct of droppable fields
+# Super-linear `rustc -O` compile time building an aggregate literal with diverging initializers
 
-Minimal, self-contained reproducer for an LLVM-optimizer super-linearity: a single
-function that initializes `N` **droppable** struct fields, each through the `?`
-operator, makes the function-level optimization pipeline grow ~**cubically** in `N`.
+Minimal, self-contained reproducer for an LLVM-optimizer super-linearity. Building an
+aggregate (struct or array) **literal** of `N` elements, where each element
+initializer can **diverge** (early-return) and the element type has **drop glue**,
+makes the function-level optimization pipeline grow ~**cubically** in `N`.
 
-The pattern is common in generated/macro code (it was first hit in a real codebase
-where a derive macro emitted a struct `new()` with ~124 `?`-initialized fields; that
-crate took ~120 s to compile).
+The pattern is common in generated/macro code (first hit in a real codebase where a
+derive macro emitted a struct `new()` with ~124 `?`-initialized fields; that crate
+took ~120 s to compile).
+
+**The minimal trigger and a clean workaround** — see [Ablations](#ablations--minimal-trigger)
+below. Short version: binding the fallible values to `let`s and *then* constructing
+the aggregate (instead of interleaving `?` inside the literal) is **~165× faster** at
+N=256 and stays linear.
 
 ## Reproduce
 
@@ -47,22 +53,47 @@ pub fn build(seed: u64) -> Result<Big, ()> {
 
 Doubling N from 64→128→256 multiplies wall time by ~8× each step → **≈ O(N³)**.
 
-## The `?` is the trigger (control)
+## Ablations — minimal trigger
 
-Same `N` droppable fields, built **infallibly** (`control_128_no_question_mark.rs`,
-`make_one` returns `String` not `Result`):
+`python3 ablations.py <variant> 128` then compile with `-O -Ccodegen-units=1`
+(measured on `rustc 1.94.1`):
+
+| variant | wall | takeaway |
+|---|---|---|
+| `baseline` — struct of `String` via `?` | 5.6s | reference |
+| `array` — array literal `[..]` via `?` | 5.6s | **any aggregate literal**, not structs |
+| `manual` — `match`/`return` instead of `?` | 5.5s | **not `?`-specific**; any divergence |
+| `box` — field type `Box<u64>` | 2.2s | drop glue alone is enough |
+| `nodrop` — non-`Copy` field, **no `Drop`** | 0.1s | **needs drop glue** (not just moves) |
+| `copy` — field type `u64` | 0.1s | — |
+| `locals` — `N` `let x = make()?;`, no aggregate | 0.2s | **needs the aggregate literal** |
+| `bind_then_build` — bind fallibly, then build | 0.2s | **divergence must be *inside* the literal** |
+| `inlinable` — producer is inlinable | 79.3s | inlining the producer amplifies it ~14× |
+
+Minimal trigger: **aggregate literal × element type with drop glue × diverging
+initializers interleaved with construction**. Each diverging initializer needs a
+cleanup path dropping the elements built so far → `O(N²)` cleanup CFG → super-linear
+optimizer time. (`bind_then_build` returns the same 128-field aggregate as `baseline`,
+so it is not the size of the return value.)
+
+### Workaround / fix
+
+Bind fallible values first, then build the aggregate infallibly:
+
+```rust
+let f0 = make_one(s ^ 0)?;
+let f1 = make_one(s ^ 1)?;
+// ...
+Ok(Big { f0, f1, /* ... */ })
+```
 
 | N | 64 | 128 | 256 |
 |---|----|-----|-----|
-| with `?`     | 1.0s | 8.1s | 69.2s |
-| without `?`  | 0.10s | 0.12s | 0.22s |
+| interleaved `?` in literal | 1.0s | 8.1s | 66.1s |
+| bind-then-build | 0.2s | 0.2s | **0.4s** |
 
-Identical struct, identical drops — only the `?` early-return cleanup paths differ.
-Each `?` that returns `Err` must drop the fields initialized so far, producing
-`O(N²)` cleanup blocks; the optimizer is super-linear over that CFG.
-
-`-Copt-level` sensitivity (nightly, N=128): `O0` 0.4s · `O1` 3.4s · `O2` 8.7s ·
-`O3` 8.3s · `Os`/`Oz` 6.0s. Present at every level ≥ 1; `O0` is unaffected.
+`-Copt-level` sensitivity (nightly, N=128, baseline): `O0` 0.4s · `O1` 3.4s ·
+`O2` 8.7s · `O3` 8.3s · `Os`/`Oz` 6.0s. Present at every level ≥ 1; `O0` unaffected.
 
 ## Where the time goes (`-Zllvm-time-trace`, leaf-pass self-time)
 

@@ -109,18 +109,16 @@ N=128, nightly (LLVM 22.1.2):
 These three/four passes each grow super-linearly. N=64→128 (2× input):
 InstCombine 9.6×, CVP 10.8×, JumpThreading 8.4×.
 
-## Version history
+## Still slow on current stable + nightly
 
-Measured at N=64, `-O -Ccodegen-units=1`:
+`-O -Ccodegen-units=1`:
 
-| rustc | LLVM | N=64 wall |
-|---|---|---|
-| 1.90.0 | 20.1.8 | 11.9s |
-| 1.91.0 | 21.1.2 | **20.7s** (worst) |
-| 1.94.1 | 21.1.8 | 1.0s |
-| 1.96.0 (stable) | 22.1.2 | 1.0s |
-| 1.98.0-nightly (e7815e522) | 22.1.6 | 1.0s |
+| rustc | LLVM | N=64 | N=128 |
+|---|---|---|---|
+| 1.94.1 | 21.1.8 | 1.0s | 8.1s |
+| 1.96.0 (stable) | 22.1.2 | 1.0s | 8.3s |
+| 1.98.0-nightly (e7815e522) | 22.1.6 | 1.0s | 9.7s |
 
-A large constant-factor improvement landed with LLVM 21.1.8 (rustc 1.94), but the
-growth is **still super-linear** on current stable/nightly — it is merely shifted to
-larger N.
+Older toolchains were far worse (LLVM 20, rustc 1.90: N=128 = **503s**); a large
+constant-factor fix landed in LLVM 21.1.8, but the growth is **still super-linear** on
+current stable/nightly — just shifted to larger N.

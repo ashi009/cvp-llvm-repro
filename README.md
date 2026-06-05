@@ -122,3 +122,23 @@ InstCombine 9.6×, CVP 10.8×, JumpThreading 8.4×.
 Older toolchains were far worse (LLVM 20, rustc 1.90: N=128 = **503s**); a large
 constant-factor fix landed in LLVM 21.1.8, but the growth is **still super-linear** on
 current stable/nightly — just shifted to larger N.
+
+## MIR evidence (the cleanup explosion is in drop elaboration, not LLVM)
+
+`drop`-terminator / basic-block / cleanup-block counts in the optimized MIR of
+`build()` (`rustc -O --emit=mir`), via `python3 mir_count.py`:
+
+| N | variant | bbs | drops | cleanup bbs |
+|---|---|---|---|---|
+| 16 | baseline | 321 | 254 | 269 |
+| 16 | bind_then_build | 82 | 30 | 31 |
+| 32 | baseline | 1153 | 1022 | 1053 |
+| 32 | bind_then_build | 162 | 62 | 63 |
+| 64 | baseline | 4353 | 4094 | 4157 |
+| 64 | bind_then_build | 322 | 126 | 127 |
+
+For the interleaved-divergence aggregate literal these are **≈ N²** (4094 ≈ 64² at
+N=64); for bind-then-build they are **≈ 2N**. Each construction point gets a cleanup
+chain dropping the suffix of already-initialized elements, so a partially-initialized
+aggregate produces a quadratic cleanup ladder at the MIR level — already present before
+the LLVM passes run.

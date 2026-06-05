@@ -1,18 +1,23 @@
-# Super-linear `rustc -O` compile time building an aggregate literal with diverging initializers
+# `O(N²)` drop-elaboration cleanup for aggregate literals with diverging initializers → super-linear `-O` compile time
 
-Minimal, self-contained reproducer for an LLVM-optimizer super-linearity. Building an
-aggregate (struct or array) **literal** of `N` elements, where each element
-initializer can **diverge** (early-return) and the element type has **drop glue**,
-makes the function-level optimization pipeline grow ~**cubically** in `N`.
+Minimal, self-contained reproducer. Building an aggregate (struct or array) **literal**
+of `N` elements, where each element initializer can **diverge** (early-return) and the
+element type has **drop glue**, makes compile time grow ~**cubically** in `N` at `-O`.
 
-The pattern is common in generated/macro code (first hit in a real codebase where a
-derive macro emitted a struct `new()` with ~124 `?`-initialized fields; that crate
-took ~120 s to compile).
+**Root cause is in MIR drop elaboration, not (only) LLVM.** A partially-initialized
+aggregate literal gets an `O(N²)` cleanup ladder — each construction point unwinds to a
+chain dropping the *suffix* of already-initialized elements — so the optimized MIR
+already has ≈ N² `drop` terminators/cleanup blocks before any LLVM pass runs (see
+[MIR evidence](#mir-evidence-the-cleanup-explosion-is-in-drop-elaboration-not-llvm)).
+LLVM's function passes (`InstCombine`/`CorrelatedValuePropagation`/`JumpThreading`) are
+then super-linear on that `O(N²)` CFG, compounding it to ~`O(N³)` wall time.
 
-**The minimal trigger and a clean workaround** — see [Ablations](#ablations--minimal-trigger)
-below. Short version: binding the fallible values to `let`s and *then* constructing
-the aggregate (instead of interleaving `?` inside the literal) is **~165× faster** at
-N=256 and stays linear.
+Binding the fallible values to `let`s and *then* constructing the aggregate keeps the
+MIR at `O(N)` and compile time linear — **~165× faster at N=256** (see
+[Workaround](#workaround--fix)).
+
+First hit in real macro-generated code: a derive macro emitting a struct `new()` with
+~124 `?`-initialized fields took ~120 s to compile one crate.
 
 ## Reproduce
 

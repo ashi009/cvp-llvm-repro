@@ -39,7 +39,7 @@ pub fn build(seed: u64) -> Result<Big, ()> {
 ```
 
 Full reproducer + generator (`generate.py N`) + measurement scripts:
-<https://github.com/OWNER/cvp-llvm-repro> *(fill in once pushed)*
+<https://github.com/ashi009/cvp-llvm-repro>
 
 ### Steps to reproduce
 

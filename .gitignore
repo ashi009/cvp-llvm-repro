@@ -1,0 +1,4 @@
+*.o
+*.rlib
+*.llvm_timings.json
+/tmp/

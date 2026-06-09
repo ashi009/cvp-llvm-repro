@@ -5,7 +5,7 @@
 import sys
 N = int(sys.argv[1])
 out = []
-out.append("// Auto-generated CVP repro. Build: rustc -O -Ccodegen-units=1 this.rs --crate-type=lib")
+out.append("// Auto-generated repro for rust-lang/rust#157463. See README.")
 out.append("#![allow(dead_code)]")
 out.append("")
 # Opaque fallible producer of a droppable value (String has drop glue).

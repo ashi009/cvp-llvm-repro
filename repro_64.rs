@@ -1,4 +1,4 @@
-// Auto-generated CVP repro. Build: rustc -O -Ccodegen-units=1 this.rs --crate-type=lib
+// Auto-generated repro for rust-lang/rust#157463. See README.
 #![allow(dead_code)]
 
 #[inline(never)]
